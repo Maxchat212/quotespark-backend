@@ -2,13 +2,14 @@ const express = require('express');
 const bodyParser = require('body-parser');
 const cors = require('cors');
 const admin = require('firebase-admin');
+const axios = require('axios');
 const crypto = require('crypto');
 
 const app = express();
 app.use(cors());
 app.use(bodyParser.json());
 
-// ✅ Load Firebase credentials from environment variable
+// ✅ Load Firebase service account from environment variable
 const serviceAccount = JSON.parse(process.env.FIREBASE_KEY);
 
 admin.initializeApp({
@@ -17,10 +18,49 @@ admin.initializeApp({
 
 const db = admin.firestore();
 
-// ✅ Flutterwave secret hash (set in Render secrets)
+// 🔐 Flutterwave secret hash and secret key from environment
 const FLW_SECRET = process.env.FLW_SECRET;
 
-// ✅ Flutterwave Webhook Endpoint
+// ✅ Create Flutterwave payment link
+app.post('/create-payment-link', async (req, res) => {
+  const { amount, email, uid } = req.body;
+
+  if (!amount || !email || !uid) {
+    return res.status(400).json({ error: 'Missing fields' });
+  }
+
+  try {
+    const response = await axios.post(
+      'https://api.flutterwave.com/v3/payments',
+      {
+        tx_ref: `QS-${Date.now()}`,
+        amount,
+        currency: 'NGN',
+        redirect_url: 'https://google.com', // Change later
+        customer: { email },
+        meta: { uid },
+        customizations: {
+          title: 'QuoteSpark Wallet Top-up',
+          description: `Buying coins worth ₦${amount}`,
+        },
+      },
+      {
+        headers: {
+          Authorization: `Bearer ${FLW_SECRET}`,
+          'Content-Type': 'application/json',
+        },
+      }
+    );
+
+    const paymentLink = response.data.data.link;
+    return res.json({ link: paymentLink });
+  } catch (error) {
+    console.error('❌ Flutterwave error:', error.response?.data || error.message);
+    return res.status(500).json({ error: 'Failed to create payment link' });
+  }
+});
+
+// ✅ Flutterwave webhook to credit wallet
 app.post('/flutterwave-webhook', async (req, res) => {
   const signature = req.headers['verif-hash'];
 
@@ -37,40 +77,27 @@ app.post('/flutterwave-webhook', async (req, res) => {
     const txRef = data.tx_ref;
     const uid = data.meta?.uid;
 
-    if (!uid) {
-      console.log('❌ UID missing in metadata');
-      return res.status(400).send('Missing user ID');
-    }
+    if (!uid) return res.status(400).send('Missing user ID');
 
-    const coins = Math.floor(amount / 15); // Example: ₦15 = 1 coin
+    const coins = Math.floor(amount / 15); // Conversion logic
 
-    try {
-      const userRef = db.collection('users').doc(uid);
+    const userRef = db.collection('users').doc(uid);
 
-      await userRef.update({
-        'wallet.balance': admin.firestore.FieldValue.increment(coins),
-        'wallet.totalReceived': admin.firestore.FieldValue.increment(coins),
-      });
+    await userRef.update({
+      'wallet.balance': admin.firestore.FieldValue.increment(coins),
+      'wallet.totalReceived': admin.firestore.FieldValue.increment(coins),
+    });
 
-      console.log(`✅ Wallet updated for UID: ${uid}, +${coins} coins`);
-      return res.status(200).send('Wallet credited');
-    } catch (err) {
-      console.error('🔥 Error updating wallet:', err);
-      return res.status(500).send('Error updating wallet');
-    }
+    console.log(`✅ Wallet credited: UID=${uid}, Coins=${coins}`);
+    return res.status(200).send('Wallet updated');
   }
 
-  res.status(400).send('Payment not successful');
+  res.status(400).send('Payment not completed');
 });
 
-// ✅ Test Route (Optional)
-app.get('/', (req, res) => {
-  res.send('QuoteSpark Flutterwave backend is live 🚀');
-});
-
-// ✅ Start server (Render will use this)
+// ✅ Start the server
 const PORT = process.env.PORT || 5000;
 app.listen(PORT, () => {
-  console.log(`✅ Server running on http://localhost:${PORT}`);
+  console.log(`🚀 Server running on http://localhost:${PORT}`);
 });
 
