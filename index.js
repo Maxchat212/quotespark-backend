@@ -8,7 +8,7 @@ const app = express();
 app.use(cors());
 app.use(bodyParser.json());
 
-// ✅ Load Firebase service account from environment variable
+// ✅ Load Firebase credentials from environment variable
 const serviceAccount = JSON.parse(process.env.FIREBASE_KEY);
 
 admin.initializeApp({
@@ -17,10 +17,10 @@ admin.initializeApp({
 
 const db = admin.firestore();
 
-// 🔐 Your Flutterwave secret hash (set in Render environment)
+// ✅ Flutterwave secret hash (set in Render secrets)
 const FLW_SECRET = process.env.FLW_SECRET;
 
-// 🚀 Flutterwave Webhook endpoint
+// ✅ Flutterwave Webhook Endpoint
 app.post('/flutterwave-webhook', async (req, res) => {
   const signature = req.headers['verif-hash'];
 
@@ -37,27 +37,40 @@ app.post('/flutterwave-webhook', async (req, res) => {
     const txRef = data.tx_ref;
     const uid = data.meta?.uid;
 
-    if (!uid) return res.status(400).send('Missing user ID');
+    if (!uid) {
+      console.log('❌ UID missing in metadata');
+      return res.status(400).send('Missing user ID');
+    }
 
-    const coins = Math.floor(amount / 15); // Convert Naira to coins
+    const coins = Math.floor(amount / 15); // Example: ₦15 = 1 coin
 
-    const userRef = db.collection('users').doc(uid);
+    try {
+      const userRef = db.collection('users').doc(uid);
 
-    await userRef.update({
-      'wallet.balance': admin.firestore.FieldValue.increment(coins),
-      'wallet.totalReceived': admin.firestore.FieldValue.increment(coins),
-    });
+      await userRef.update({
+        'wallet.balance': admin.firestore.FieldValue.increment(coins),
+        'wallet.totalReceived': admin.firestore.FieldValue.increment(coins),
+      });
 
-    console.log(`✅ Wallet credited: UID=${uid}, Coins=${coins}`);
-    return res.status(200).send('Wallet updated');
+      console.log(`✅ Wallet updated for UID: ${uid}, +${coins} coins`);
+      return res.status(200).send('Wallet credited');
+    } catch (err) {
+      console.error('🔥 Error updating wallet:', err);
+      return res.status(500).send('Error updating wallet');
+    }
   }
 
-  res.status(400).send('Payment not completed');
+  res.status(400).send('Payment not successful');
+});
+
+// ✅ Test Route (Optional)
+app.get('/', (req, res) => {
+  res.send('QuoteSpark Flutterwave backend is live 🚀');
 });
 
 // ✅ Start server (Render will use this)
 const PORT = process.env.PORT || 5000;
 app.listen(PORT, () => {
-  console.log(`Server running on http://localhost:${PORT}`);
+  console.log(`✅ Server running on http://localhost:${PORT}`);
 });
 
