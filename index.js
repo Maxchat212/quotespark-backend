@@ -1,9 +1,9 @@
+
 const express = require('express');
 const bodyParser = require('body-parser');
 const cors = require('cors');
 const admin = require('firebase-admin');
 const axios = require('axios');
-const crypto = require('crypto');
 
 const app = express();
 app.use(cors());
@@ -18,8 +18,9 @@ admin.initializeApp({
 
 const db = admin.firestore();
 
-// 🔐 Flutterwave secret hash and secret key from environment
-const FLW_SECRET = process.env.FLW_SECRET;
+// 🔐 Flutterwave secret hash (for webhook) and secret key (for API)
+const FLW_SECRET_KEY = process.env.FLW_SECRET; // Use this for API requests
+const FLW_WEBHOOK_SECRET = process.env.FLW_WEBHOOK_SECRET; // Optional if you separate webhook
 
 // ✅ Create Flutterwave payment link
 app.post('/create-payment-link', async (req, res) => {
@@ -36,7 +37,7 @@ app.post('/create-payment-link', async (req, res) => {
         tx_ref: `QS-${Date.now()}`,
         amount,
         currency: 'NGN',
-        redirect_url: 'https://google.com', // Change later
+        redirect_url: 'https://google.com', // update to your app later
         customer: { email },
         meta: { uid },
         customizations: {
@@ -46,16 +47,18 @@ app.post('/create-payment-link', async (req, res) => {
       },
       {
         headers: {
-          Authorization: `Bearer ${FLW_SECRET}`,
+          Authorization: `Bearer ${FLW_SECRET_KEY}`,
           'Content-Type': 'application/json',
         },
       }
     );
 
-    const paymentLink = response.data.data.link;
+    const paymentLink = response.data?.data?.link;
+    if (!paymentLink) throw new Error('No link returned');
+
     return res.json({ link: paymentLink });
   } catch (error) {
-    console.error('❌ Flutterwave error:', error.response?.data || error.message);
+    console.error('❌ Flutterwave error:', error?.response?.data || error.message);
     return res.status(500).json({ error: 'Failed to create payment link' });
   }
 });
@@ -64,7 +67,7 @@ app.post('/create-payment-link', async (req, res) => {
 app.post('/flutterwave-webhook', async (req, res) => {
   const signature = req.headers['verif-hash'];
 
-  if (!signature || signature !== FLW_SECRET) {
+  if (!signature || signature !== FLW_WEBHOOK_SECRET) {
     console.log('❌ Invalid Flutterwave signature');
     return res.status(401).send('Invalid signature');
   }
@@ -79,7 +82,7 @@ app.post('/flutterwave-webhook', async (req, res) => {
 
     if (!uid) return res.status(400).send('Missing user ID');
 
-    const coins = Math.floor(amount / 15); // Conversion logic
+    const coins = Math.floor(amount / 15); // Conversion rate
 
     const userRef = db.collection('users').doc(uid);
 
@@ -100,4 +103,3 @@ const PORT = process.env.PORT || 5000;
 app.listen(PORT, () => {
   console.log(`🚀 Server running on http://localhost:${PORT}`);
 });
-
