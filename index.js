@@ -8,7 +8,8 @@ app.use(cors());
 app.use(bodyParser.json());
 
 // ✅ Initialize Firebase Admin SDK
-const serviceAccount = require('./serviceAccountKey.json'); // 🔐 You will create this file later
+ const serviceAccount = JSON.parse(process.env.FIREBASE_KEY);
+// 🔐 You will create this file later
 
 admin.initializeApp({
   credential: admin.credential.cert(serviceAccount)
